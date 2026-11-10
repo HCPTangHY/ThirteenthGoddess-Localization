@@ -1,0 +1,14 @@
+game/
+source/
+tools/
+trans_origin/
+translation/
+build_tmp/
+dist/
+*.exe
+*.pck
+*.zip
+*.tar.gz
+__pycache__/
+*.pyc
+.version_cache/

@@ -1,0 +1,68 @@
+name: Build Localized Package
+
+on:
+  workflow_dispatch: {}
+  # ponytail: PZ 项目建好、配置 PARATRANZ_TOKEN / PARATRANZ_PROJECT 后再打开定时
+  # schedule:
+  #   - cron: '30 */6 * * *'
+
+env:
+  GDRE_VERSION: v2.7.4
+  PARATRANZ_PROJECT: ${{ vars.PARATRANZ_PROJECT }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install requests
+      - name: Download Paratranz export
+        id: pz
+        env:
+          PARATRANZ_TOKEN: ${{ secrets.PARATRANZ_TOKEN }}
+        run: python -m src.paratranz
+      - name: Download game
+        id: dl
+        run: python -m src.download --out game
+      - name: Check version match
+        run: |
+          if [ "${{ steps.pz.outputs.i18n_version }}" != "${{ steps.dl.outputs.version }}" ]; then
+            echo "::warning::PZ 版本 ${{ steps.pz.outputs.i18n_version }} 与游戏版本 ${{ steps.dl.outputs.version }} 不一致，按 PZ 版本的原文基线替换，原文不匹配的条目会被跳过"
+          fi
+      - name: Setup GDRE Tools
+        run: |
+          curl -sL -o gdre.zip https://github.com/GDRETools/gdsdecomp/releases/download/${GDRE_VERSION}/GDRE_tools-${GDRE_VERSION}-linux.zip
+          mkdir -p tools/gdre && unzip -oq gdre.zip -d tools/gdre && chmod +x tools/gdre/gdre_tools.x86_64
+      - name: Recover source & baseline
+        env:
+          V: ${{ steps.pz.outputs.i18n_version }}
+        run: |
+          tools/gdre/gdre_tools.x86_64 --headless --recover="${{ steps.dl.outputs.exe }}" --output="source/$V" \
+            --include="res://**/*.gdc" --include="res://**/*.remap" --include="res://**/*.scn" > recover.log 2>&1 || true
+          python -m src.extract "source/$V" "pz_origin/$V"
+      - name: Replace
+        run: python -m src.replace -v "${{ steps.pz.outputs.i18n_version }}"
+      - name: Compile & patch pck
+        id: patch
+        run: |
+          python -m src.patch -v "${{ steps.pz.outputs.i18n_version }}" --exe "${{ steps.dl.outputs.exe }}" \
+            --gdre tools/gdre/gdre_tools.x86_64 --out dist
+      - name: Pack
+        id: pack
+        run: |
+          V="${{ steps.pz.outputs.i18n_version }}"
+          NAME="ThirteenthGoddess-chs-$V-$(date -u +%Y%m%d%H%M)"
+          cd dist && zip -q "../$NAME.zip" *.exe ../game/*/changelog*.txt 2>/dev/null; cd ..
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.pack.outputs.name }}
+          name: ${{ steps.pack.outputs.name }}
+          prerelease: true
+          files: ${{ steps.pack.outputs.name }}.zip
+          body: |
+            解压直接运行 exe 即可（已内嵌汉化后的 pck）。存档与原版通用（user:// 路径不变）。

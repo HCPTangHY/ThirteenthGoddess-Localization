@@ -1,0 +1,83 @@
+name: Check Game Update
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: '强制更新（忽略版本缓存）'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 */6 * * *'
+
+env:
+  GDRE_VERSION: v2.7.4
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      has_update: ${{ steps.cmp.outputs.has_update }}
+      version: ${{ steps.chk.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install requests
+      - id: chk
+        run: python -m src.download --check-only
+      - uses: actions/cache/restore@v4
+        with:
+          path: .version_cache
+          key: tg-version-${{ github.run_id }}
+          restore-keys: tg-version-
+      - id: cmp
+        run: |
+          last=$(cat .version_cache/last 2>/dev/null || true)
+          if [ "${{ inputs.force_update }}" = "true" ] || [ "$last" != "${{ steps.chk.outputs.upload_id }}-${{ steps.chk.outputs.version }}" ]; then
+            echo "has_update=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_update=false" >> $GITHUB_OUTPUT
+          fi
+          mkdir -p .version_cache && echo "${{ steps.chk.outputs.upload_id }}-${{ steps.chk.outputs.version }}" > .version_cache/last
+      - uses: actions/cache/save@v4
+        with:
+          path: .version_cache
+          key: tg-version-${{ github.run_id }}
+
+  extract:
+    needs: check
+    if: needs.check.outputs.has_update == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+      - run: pip install requests
+      - name: Download game
+        id: dl
+        run: python -m src.download --out game
+      - name: Setup GDRE Tools
+        run: |
+          curl -sL -o gdre.zip https://github.com/GDRETools/gdsdecomp/releases/download/${GDRE_VERSION}/GDRE_tools-${GDRE_VERSION}-linux.zip
+          mkdir -p tools/gdre && unzip -oq gdre.zip -d tools/gdre && chmod +x tools/gdre/gdre_tools.x86_64
+      - name: Recover scripts & scenes
+        run: |
+          tools/gdre/gdre_tools.x86_64 --headless --recover="${{ steps.dl.outputs.exe }}" --output="source/$VERSION" \
+            --include="res://**/*.gdc" --include="res://**/*.remap" --include="res://**/*.scn" --include="res://project.binary" > recover.log 2>&1 || true
+          grep -E "Detected|Decompiled|not decompiled|Failed conversions" recover.log
+          tar czf source-$VERSION.tar.gz source/$VERSION
+      - name: Extract strings
+        run: |
+          python -m src.extract "source/$VERSION" "pz_origin/$VERSION"
+          python -m src.audit "source/$VERSION" "pz_origin/$VERSION" | head -60
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-${{ env.VERSION }}
+          path: source-${{ env.VERSION }}.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pz_origin-${{ env.VERSION }}
+          path: pz_origin/${{ env.VERSION }}
