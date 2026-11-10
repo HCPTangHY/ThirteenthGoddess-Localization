@@ -22,24 +22,28 @@ PZ 导出   paratranz.py ──▶ trans_origin/<v>/
 | `src/replace.py` | 按 `<<POS:N>>` 流式替换（来自 FindingColor），严格校验原文，自动转义 `"` 和换行 |
 | `src/patch.py` | 编译并打回 pck |
 
-## 提取规则（extract.py）
+## 提取规则
 
-扫描 `.gd` 全部字符串字面量，排除：
-- 字典键、`&"..."` / `^"..."`（StringName/NodePath）、`res://` 路径、文档字符串
-- 调用参数：`print*`/`push_*`/`BugLogger.log`/`get_node`/`get`/`has`/`add_theme_*`/`set_meta` 等（见 `SKIP_CALL`）
-- 标识符形态：无空格且是 snake_case / CamelCase / 含 `@` 数字 等；演出指令 `LEFT@pasha,RIGHT@iris`
-- 字典字段黑名单：`anchor` `sprite` `bus` `anim`
-- 目录：`scenes/debug`、`scenes/combat/sandbox`
+**.tscn**：`text / tooltip_text / placeholder_text / title / dialog_text` 全部提取，不做内容过滤。
 
-`.tscn` 只锚定 `text / tooltip_text / placeholder_text / title / dialog_text = "..."`。
+**.gd**：不看字符串长什么样，看它的**所属属性（owner）**，查 `rules/owners.txt` 决定：
 
-key 规则：`顶层const/var/func名|字典键或数组下标路径`，例如
-- `CARDS|shy_tease_hands|card_name`
-- `HELLO_LINES|BRATTY|1|0`（性格 → 好感档位 → 第 0 句）
-- 非字典/数组位置的散串：`函数名|赋值目标|文本摘要`
-- tscn：`父节点/节点名|属性`
+| owner 例子 | 含义 |
+|---|---|
+| `CARDS.card_name` | const CARDS 里（任意层级）的 card_name 字段 |
+| `CARDS.scene_text[]` | card 的 scene_text 数组元素 |
+| `HELLO_LINES.#[]` | 数字键下的数组元素 |
+| `DIALOGUE_HOOK[][4]` | 元组数组第 4 位（台词；0-3 位是序号/背景/站位/说话人） |
+| `=text` | 函数里 `xxx.text = "..."` |
+| `call:_tbtn_show_3#2` | 调用 `_tbtn_show_3(...)` 的第 2 个参数 |
+| `call:get(name)#1` | `xxx.get("name", "She")` 的默认值 |
+| `compare` / `match` / `in` / `doc` / `return` / `expr` | 比较、match 分支、in 判断、文档字符串、return、其它表达式 |
 
-重复 key 追加 `#n`。
+`rules/owners.txt` 每行 `+ owner`（提）/ `- owner`（不提）/ `? owner`（归属混杂，按内容兜底判断）；`~` 开头是正则规则，优先于精确行。
+**规则表里没有的新 owner 一律不提**，写进 `unclassified.txt`，游戏更新后看这个文件补规则即可。
+
+key：`顶层const/var/func名|字典键或数组下标路径`，代码里散落的串（赋值/参数/return）再加文本摘要，例如
+`CARDS|shy_tease_hands|card_name`、`HELLO_LINES|BRATTY|1|0`、`_show_main_buttons|_tbtn_show_3()|0|CHAT`。重复 key 追加 `#n`。
 
 ## 已知限制 / 注意
 
