@@ -10,7 +10,11 @@ PLATFORM_HINT = "forWindows"
 def list_uploads(s: requests.Session):
     html = s.get(GAME_URL, timeout=30).text
     csrf = re.search(r'name="csrf_token" value="([^"]+)"', html).group(1)
-    ups = re.findall(r'data-upload_id="(\d+)".*?class="name" title="([^"]+)"', html, re.S)
+    # itch 每次渲染的属性顺序是随机的（data-upload_id/href、title/class 会互换），只按 upload 块切分再分别取
+    ups = []
+    for blk in html.split('<div class="upload">')[1:]:
+        i = re.search(r'data-upload_id="(\d+)"', blk); n = re.search(r'<strong[^>]*\btitle="([^"]+)"', blk)
+        if i and n: ups.append((i.group(1), n.group(1)))
     return csrf, [(int(i), n) for i, n in ups]
 
 def pick(uploads):
@@ -31,7 +35,7 @@ def main(argv=None):
     ap.add_argument("--out", default="game")
     ap.add_argument("--check-only", action="store_true")
     a = ap.parse_args(argv)
-    s = requests.Session(); s.headers["User-Agent"] = "Mozilla/5.0"
+    s = requests.Session()  # 别伪装 UA：itch 对裸 "Mozilla/5.0" 返回的页面不带下载列表
     csrf, uploads = list_uploads(s)
     uid, name, version = pick(uploads)
     print(f"upload_id={uid} file={name} version={version}")
