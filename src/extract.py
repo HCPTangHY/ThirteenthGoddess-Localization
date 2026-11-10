@@ -13,12 +13,15 @@ TSCN_PROPS = re.compile(r'^(text|tooltip_text|placeholder_text|title|dialog_text
 def sem(s, n=40):
     return re.sub(r'[^A-Za-z0-9]+', '_', s[:n]).strip('_')
 
-def is_text(s):
+def is_text(s, ui=False):
     if 'res://' in s or 'user://' in s or STAGE.match(s): return False
     bare = re.sub(r'\[/?[^\]]*(\]|$)|^[^\[]*\]|\{[^}]*\}|%[-+0-9.]*[a-z%]', ' ', s)
     if not re.search(r'[A-Za-z]{2,}', bare): return False
     if ' ' not in s.strip() and IDENT.match(s) and (not s[0].isupper() or CAMEL.match(s) or re.search(r'[_@\d]|-[a-z]', s)): return False
-    if not re.search(r'[a-z]', s): return False
+    if not re.search(r'[a-z]', s):
+        # 全大写：tscn 的 text 属性都算；gd 里要带空格或句末标点，避免吃掉 "SHY"/"BRATTY" 这类枚举值
+        if ui: return bool(re.search(r'[A-Z]{2,}', bare))
+        return bool(re.search(r'[A-Z]{2,}', bare) and re.search(r'[A-Z][ !?.:…]+\S|[A-Z][!?.…]$', s.strip()))
     return True
 
 def scan_gd(src):
@@ -91,7 +94,7 @@ def scan_tscn(src):
             start = pos + m.end(); j = start
             while j < len(src) and src[j] != '"': j += 2 if src[j] == '\\' else 1
             s = src[start:j]
-            if is_text(s): out.append((f'{node}|{m.group(1)}', s, start))
+            if is_text(s, ui=True): out.append((f'{node}|{m.group(1)}', s, start))
         pos += len(line) + 1
     return out
 
